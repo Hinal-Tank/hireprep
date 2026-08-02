@@ -1790,7 +1790,9 @@ class DatabaseService {
   }
 
   getRoomMessages(roomId: string): ChatMessage[] {
-    return this.data.chatMessages.filter((m) => m.roomId === roomId);
+    return this.data.chatMessages.filter(
+      (m) => m.roomId === roomId && !m.message.startsWith('New question selected:')
+    );
   }
 
   // --- Analytics & User Progress ---
@@ -1843,6 +1845,7 @@ class DatabaseService {
       studyRoomsJoined: userRooms.length,
       totalScore,
       categoryBreakdown,
+      solvedQuestionIds: Array.from(correctQuestions),
       recentSubmissions: userSubs.slice(-10).reverse(),
     };
   }
