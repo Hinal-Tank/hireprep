@@ -71,20 +71,3 @@ JWT_SECRET=your-secure-custom-secret-key
    ```bash
    npm run start
    ```
-
----
-
-## 🌐 Deployment Guide (Render / Cloud Hosts)
-
-1. Connect your GitHub repository to **Render** (or Railway / Heroku).
-2. Create a new **Web Service**.
-3. Set the following build settings:
-   - **Environment**: Node
-   - **Build Command**: `npm run build`
-   - **Start Command**: `npm run start`
-4. Add Environment Variables:
-   - `NODE_ENV` = `production`
-   - `JWT_SECRET` = `your-custom-random-secret-key`
-5. Click **Deploy**.
-
-
