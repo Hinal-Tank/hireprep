@@ -30,6 +30,7 @@ import {
   ChevronRight,
   Filter,
   ArrowRight,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   StudyRoom,
@@ -77,6 +78,28 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   const [mcqSelected, setMcqSelected] = useState<number | null>(null);
   const [codeAnswer, setCodeAnswer] = useState<string>('');
   const [submissionFeedback, setSubmissionFeedback] = useState<string | null>(null);
+  const [solvedQuestionIds, setSolvedQuestionIds] = useState<Set<string>>(new Set());
+
+  // Fetch user solved questions on load
+  useEffect(() => {
+    const fetchUserProgress = async () => {
+      if (!token) return;
+      try {
+        const res = await fetch('/api/user/progress', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.solvedQuestionIds) {
+            setSolvedQuestionIds(new Set(data.solvedQuestionIds));
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching user solved questions:', err);
+      }
+    };
+    fetchUserProgress();
+  }, [token]);
 
   const categories = React.useMemo(() => {
     const cats = new Set<string>();
@@ -268,6 +291,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
         );
 
         if (isCorrect) {
+          setSolvedQuestionIds((prev) => new Set(prev).add(activeQuestion.id));
           sendSubmissionScore(roomId, data.score);
           updateStatus(roomId, `Solved ${activeQuestion.title}`, 'Correct');
           confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
@@ -549,27 +573,34 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                   <div className="flex flex-wrap gap-1.5 pt-0.5">
                     <button
                       onClick={() => handleCategoryChange('ALL')}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center space-x-1 ${
                         selectedCategory === 'ALL'
                           ? 'bg-indigo-600 text-white shadow-xs'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      All Categories ({questions.length})
+                      <span>All Categories ({questions.length})</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${selectedCategory === 'ALL' ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-100 text-slate-600'}`}>
+                        {questions.filter((q) => solvedQuestionIds.has(q.id)).length} Solved
+                      </span>
                     </button>
                     {categories.map((cat) => {
-                      const count = questions.filter((q) => q.categoryName === cat).length;
+                      const catQuestions = questions.filter((q) => q.categoryName === cat);
+                      const catSolvedCount = catQuestions.filter((q) => solvedQuestionIds.has(q.id)).length;
                       return (
                         <button
                           key={cat}
                           onClick={() => handleCategoryChange(cat)}
-                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center space-x-1.5 ${
                             selectedCategory === cat
                               ? 'bg-indigo-600 text-white shadow-xs'
                               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                           }`}
                         >
-                          {cat} ({count})
+                          <span>{cat} ({catQuestions.length})</span>
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${selectedCategory === cat ? 'bg-indigo-700 text-indigo-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                            {catSolvedCount}/{catQuestions.length} Solved
+                          </span>
                         </button>
                       );
                     })}
@@ -582,6 +613,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                     <span className="text-xs font-bold text-slate-800">Active Room Question:</span>
                     <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
                       {currentQuestionIdx >= 0 ? `${currentQuestionIdx + 1} / ${filteredQuestions.length}` : '0 / 0'}
+                      {filteredQuestions.length > 0 && ` (${filteredQuestions.filter(q => solvedQuestionIds.has(q.id)).length} Solved)`}
                     </span>
                   </div>
 
@@ -604,11 +636,14 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                       }}
                       className="bg-slate-50 border border-slate-200 text-indigo-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer max-w-xs"
                     >
-                      {filteredQuestions.map((q, idx) => (
-                        <option key={q.id} value={q.id} className="bg-white text-slate-800">
-                          Q{idx + 1}: [{q.categoryName}] {q.title} ({q.type.toUpperCase()})
-                        </option>
-                      ))}
+                      {filteredQuestions.map((q, idx) => {
+                        const isSolved = solvedQuestionIds.has(q.id);
+                        return (
+                          <option key={q.id} value={q.id} className="bg-white text-slate-800">
+                            {isSolved ? '✓ [Solved] ' : ''}Q{idx + 1}: [{q.categoryName}] {q.title} ({q.type.toUpperCase()})
+                          </option>
+                        );
+                      })}
                     </select>
 
                     <button
@@ -626,9 +661,23 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                 {activeQuestion && (
                   <div className="space-y-4">
                     <div>
-                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded uppercase">
-                        {activeQuestion.categoryName} • {activeQuestion.type.toUpperCase()}
-                      </span>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded uppercase">
+                          {activeQuestion.categoryName} • {activeQuestion.type.toUpperCase()}
+                        </span>
+
+                        {solvedQuestionIds.has(activeQuestion.id) ? (
+                          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Marked Solved</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                            <span>Unsolved</span>
+                          </span>
+                        )}
+                      </div>
+
                       <h2 className="text-xl font-bold text-slate-900 mt-1">{activeQuestion.title}</h2>
                       <p className="text-xs text-slate-600 leading-relaxed mt-1">{activeQuestion.description}</p>
                     </div>
