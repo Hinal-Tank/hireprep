@@ -50,8 +50,6 @@ export function setupSocketHandlers(io: SocketIOServer) {
     // 2. Select Question for Room
     socket.on('select_room_question', ({ roomId, questionId, question }: { roomId: string; questionId: string; question: any }) => {
       io.to(roomId).emit('room_question_changed', { questionId, question });
-      db.addChatMessage(roomId, 'system', 'HirePrep System', `New question selected: "${question.title}"`);
-      io.to(roomId).emit('chat_message', db.getRoomMessages(roomId).slice(-1)[0]);
     });
 
     // 3. Update Solving Status
