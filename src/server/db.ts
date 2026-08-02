@@ -1390,6 +1390,12 @@ class DatabaseService {
       try {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         this.data = JSON.parse(raw);
+        if (!this.data.passwords) {
+          this.data.passwords = {};
+        }
+        if (!this.data.users) {
+          this.data.users = [];
+        }
         console.log('Database loaded from file successfully.');
 
         // Remove any former aptitude category or questions if present
@@ -1517,20 +1523,27 @@ class DatabaseService {
   }
 
   getUserByEmailOrUsername(term: string): User | undefined {
+    if (!term) return undefined;
     const lower = term.toLowerCase().trim();
     return this.data.users.find(
-      (u) => u.email.toLowerCase() === lower || u.username.toLowerCase() === lower
+      (u) =>
+        (u.email && u.email.toLowerCase().trim() === lower) ||
+        (u.username && u.username.toLowerCase().trim() === lower)
     );
   }
 
   createUser(userData: Omit<User, 'id' | 'createdAt'>, passwordPlain: string): User {
     const id = 'usr-' + Math.random().toString(36).substring(2, 9);
-    const hashedPassword = bcrypt.hashSync(passwordPlain, 10);
+    const cleanPassword = passwordPlain ? passwordPlain.trim() : '';
+    const hashedPassword = bcrypt.hashSync(cleanPassword, 10);
     const newUser: User = {
       ...userData,
       id,
       createdAt: new Date().toISOString(),
     };
+    if (!this.data.passwords) {
+      this.data.passwords = {};
+    }
     this.data.users.push(newUser);
     this.data.passwords[id] = hashedPassword;
     this.persist();
@@ -1541,8 +1554,11 @@ class DatabaseService {
     const idx = this.data.users.findIndex((u) => u.id === id);
     if (idx === -1) return undefined;
     this.data.users[idx] = { ...this.data.users[idx], ...updates };
+    if (!this.data.passwords) {
+      this.data.passwords = {};
+    }
     if (newPasswordPlain) {
-      this.data.passwords[id] = bcrypt.hashSync(newPasswordPlain, 10);
+      this.data.passwords[id] = bcrypt.hashSync(newPasswordPlain.trim(), 10);
     }
     this.persist();
     return this.data.users[idx];
@@ -1552,15 +1568,19 @@ class DatabaseService {
     const idx = this.data.users.findIndex((u) => u.id === id);
     if (idx === -1) return false;
     this.data.users.splice(idx, 1);
-    delete this.data.passwords[id];
+    if (this.data.passwords) {
+      delete this.data.passwords[id];
+    }
     this.persist();
     return true;
   }
 
   verifyPassword(userId: string, passwordPlain: string): boolean {
+    if (!this.data.passwords) return false;
     const hashed = this.data.passwords[userId];
     if (!hashed) return false;
-    return bcrypt.compareSync(passwordPlain, hashed);
+    const cleanPassword = passwordPlain ? passwordPlain.trim() : '';
+    return bcrypt.compareSync(cleanPassword, hashed) || bcrypt.compareSync(passwordPlain, hashed);
   }
 
   // --- Categories ---
