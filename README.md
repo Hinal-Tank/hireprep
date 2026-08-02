@@ -87,8 +87,4 @@ JWT_SECRET=your-secure-custom-secret-key
    - `JWT_SECRET` = `your-custom-random-secret-key`
 5. Click **Deploy**.
 
----
 
-## 📄 License
-
-This project is licensed under the MIT License.
