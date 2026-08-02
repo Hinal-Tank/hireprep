@@ -1,0 +1,6 @@
+{
+  "name": "HirePrep",
+  "description": "Collaborative interview-preparation platform with practice questions, study rooms, live chat, whiteboard, voice/video calls, and real-time scoreboards.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

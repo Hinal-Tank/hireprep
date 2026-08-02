@@ -1,0 +1,120 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+import { useAuth } from './AuthContext.js';
+
+interface SocketContextType {
+  socket: Socket | null;
+  isConnected: boolean;
+  joinRoom: (roomId: string) => void;
+  sendChatMessage: (roomId: string, message: string) => void;
+  selectRoomQuestion: (roomId: string, questionId: string, question: any) => void;
+  updateStatus: (roomId: string, activity: string, solvingStatus?: string) => void;
+  drawWhiteboard: (roomId: string, element: any) => void;
+  clearWhiteboard: (roomId: string) => void;
+  sendSubmissionScore: (roomId: string, points: number) => void;
+}
+
+const SocketContext = createContext<SocketContextType | undefined>(undefined);
+
+export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    const socketInstance = io(window.location.origin, {
+      autoConnect: true,
+      transports: ['websocket', 'polling'],
+    });
+
+    socketInstance.on('connect', () => {
+      setIsConnected(true);
+      console.log('Connected to socket server');
+    });
+
+    socketInstance.on('disconnect', () => {
+      setIsConnected(false);
+      console.log('Disconnected from socket server');
+    });
+
+    setSocket(socketInstance);
+
+    return () => {
+      socketInstance.disconnect();
+    };
+  }, []);
+
+  const joinRoom = (roomId: string) => {
+    if (socket && user) {
+      socket.emit('join_room', { roomId, user: { id: user.id, username: user.username, avatar: user.avatar } });
+    }
+  };
+
+  const sendChatMessage = (roomId: string, message: string) => {
+    if (socket && user) {
+      socket.emit('send_chat_message', {
+        roomId,
+        userId: user.id,
+        username: user.username,
+        avatar: user.avatar,
+        message,
+      });
+    }
+  };
+
+  const selectRoomQuestion = (roomId: string, questionId: string, question: any) => {
+    if (socket) {
+      socket.emit('select_room_question', { roomId, questionId, question });
+    }
+  };
+
+  const updateStatus = (roomId: string, activity: string, solvingStatus?: string) => {
+    if (socket && user) {
+      socket.emit('update_member_status', { roomId, userId: user.id, activity, solvingStatus });
+    }
+  };
+
+  const drawWhiteboard = (roomId: string, element: any) => {
+    if (socket) {
+      socket.emit('whiteboard_draw', { roomId, element });
+    }
+  };
+
+  const clearWhiteboard = (roomId: string) => {
+    if (socket) {
+      socket.emit('whiteboard_clear', { roomId });
+    }
+  };
+
+  const sendSubmissionScore = (roomId: string, points: number) => {
+    if (socket && user) {
+      socket.emit('room_submission', { roomId, userId: user.id, pointsEarned: points });
+    }
+  };
+
+  return (
+    <SocketContext.Provider
+      value={{
+        socket,
+        isConnected,
+        joinRoom,
+        sendChatMessage,
+        selectRoomQuestion,
+        updateStatus,
+        drawWhiteboard,
+        clearWhiteboard,
+        sendSubmissionScore,
+      }}
+    >
+      {children}
+    </SocketContext.Provider>
+  );
+};
+
+export const useSocket = () => {
+  const context = useContext(SocketContext);
+  if (!context) {
+    throw new Error('useSocket must be used within a SocketProvider');
+  }
+  return context;
+};
