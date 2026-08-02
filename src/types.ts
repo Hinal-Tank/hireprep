@@ -190,6 +190,7 @@ export interface UserProgressStats {
   studyRoomsJoined: number;
   totalScore: number;
   categoryBreakdown: Record<string, { solved: number; total: number; correct: number }>;
+  solvedQuestionIds?: string[];
   recentSubmissions: Submission[];
 }
 
