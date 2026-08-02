@@ -1,20 +1,94 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# HirePrep - Placement & Interview Preparation Platform
 
-# Run and deploy your AI Studio app
+**HirePrep** is a full-stack, comprehensive interview preparation platform designed for students, software engineers, and job seekers to master Technical MCQs, Coding & DSA problems, SQL Querying, and HR Interview scenarios.
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/94943e17-e719-436e-9df7-5c259c3f3e11
+## 🚀 Features
 
-## Run Locally
+- **Technical MCQ Practice**: Hundreds of curated questions across C, C++, Java, Python, SQL, and HR topics with detailed explanations.
+- **SQL Query Playground**: Execute real SQL queries against an interactive sample database (Employees, Departments) with immediate table rendering and solution comparisons.
+- **Coding & DSA Sandbox**: Clean, language-specific problem templates (Python, C++, C, Java) without unnecessary boilerplate or pre-written code.
+- **HR Interview Simulator**: Practice Behavioral & HR interview questions with structured answer guidelines and rating rubrics.
+- **Collaborative Study Rooms**: Real-time study spaces and group workspaces for peer practice.
+- **Analytics & Progress Dashboard**: Real-time performance metrics, topic mastery breakdowns, and score tracking.
+- **Admin Control Panel**: Add, edit, or manage custom questions across categories.
 
-**Prerequisites:**  Node.js
+---
 
+## 🛠️ Tech Stack
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- **Frontend**: React 18, TypeScript, Tailwind CSS, Lucide Icons, Framer Motion
+- **Backend**: Node.js, Express, TypeScript (Bundled with `esbuild`)
+- **Database / Store**: In-memory / JSON persistence with pre-loaded Question Banks
+- **Build Tool**: Vite & `esbuild`
+
+---
+
+## 📋 Environment Variables
+
+You can configure the following environment variable in `.env` or on your hosting provider (e.g. Render, Railway, Heroku):
+
+```env
+PORT=3000
+NODE_ENV=production
+JWT_SECRET=your-secure-custom-secret-key
+```
+
+---
+
+## 💻 Local Development
+
+### Prerequisites
+- Node.js (v18 or higher)
+- npm or bun
+
+### Setup Instructions
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Hinal-Tank/hireprep.git
+   cd hireprep
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+   The application will be running live at `http://localhost:3000`.
+
+4. **Build for Production:**
+   ```bash
+   npm run build
+   ```
+
+5. **Start Production Server:**
+   ```bash
+   npm run start
+   ```
+
+---
+
+## 🌐 Deployment Guide (Render / Cloud Hosts)
+
+1. Connect your GitHub repository to **Render** (or Railway / Heroku).
+2. Create a new **Web Service**.
+3. Set the following build settings:
+   - **Environment**: Node
+   - **Build Command**: `npm run build`
+   - **Start Command**: `npm run start`
+4. Add Environment Variables:
+   - `NODE_ENV` = `production`
+   - `JWT_SECRET` = `your-custom-random-secret-key`
+5. Click **Deploy**.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License.
