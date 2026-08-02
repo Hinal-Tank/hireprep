@@ -26,6 +26,10 @@ import {
   Layers,
   Sparkles,
   Play,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  ArrowRight,
 } from 'lucide-react';
 import {
   StudyRoom,
@@ -68,10 +72,46 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
   // Question Selector & Practice State inside Study Room
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
   const [mcqSelected, setMcqSelected] = useState<number | null>(null);
   const [codeAnswer, setCodeAnswer] = useState<string>('');
   const [submissionFeedback, setSubmissionFeedback] = useState<string | null>(null);
+
+  const categories = React.useMemo(() => {
+    const cats = new Set<string>();
+    questions.forEach((q) => {
+      if (q.categoryName) cats.add(q.categoryName);
+    });
+    return Array.from(cats);
+  }, [questions]);
+
+  const filteredQuestions = React.useMemo(() => {
+    if (selectedCategory === 'ALL') return questions;
+    return questions.filter((q) => q.categoryName === selectedCategory);
+  }, [questions, selectedCategory]);
+
+  const currentQuestionIdx = filteredQuestions.findIndex((q) => q.id === activeQuestion?.id);
+
+  const handleNextQuestion = () => {
+    if (filteredQuestions.length === 0) return;
+    const nextIdx = currentQuestionIdx < 0 ? 0 : (currentQuestionIdx + 1) % filteredQuestions.length;
+    handleSelectQuestion(filteredQuestions[nextIdx]);
+  };
+
+  const handlePreviousQuestion = () => {
+    if (filteredQuestions.length === 0) return;
+    const prevIdx = currentQuestionIdx <= 0 ? filteredQuestions.length - 1 : currentQuestionIdx - 1;
+    handleSelectQuestion(filteredQuestions[prevIdx]);
+  };
+
+  const handleCategoryChange = (cat: string) => {
+    setSelectedCategory(cat);
+    const matched = cat === 'ALL' ? questions : questions.filter((q) => q.categoryName === cat);
+    if (matched.length > 0) {
+      handleSelectQuestion(matched[0]);
+    }
+  };
 
   // Whiteboard State & Canvas Ref
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -231,7 +271,14 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
           sendSubmissionScore(roomId, data.score);
           updateStatus(roomId, `Solved ${activeQuestion.title}`, 'Correct');
           confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+          setSubmissionFeedback(
+            `🎉 Correct! Earned +${data.score} room points. Moving to the next question in 1.5s...`
+          );
+          setTimeout(() => {
+            handleNextQuestion();
+          }, 1500);
         } else {
+          setSubmissionFeedback(`Incorrect answer (${data.status}). Try again or discuss with your peers!`);
           updateStatus(roomId, `Attempted ${activeQuestion.title}`, 'Incorrect');
         }
       }
@@ -487,23 +534,93 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
           {activeWorkspaceTab === 'question' && (
             <div className="space-y-6 flex-1 flex flex-col justify-between">
               <div className="space-y-4">
-                {/* Question Selector Bar */}
+                {/* Category Selection Bar */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 px-0.5">
+                    <span className="flex items-center space-x-1.5">
+                      <Filter className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>Select Topic / Category:</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      {filteredQuestions.length} Question(s) Available
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    <button
+                      onClick={() => handleCategoryChange('ALL')}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        selectedCategory === 'ALL'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      All Categories ({questions.length})
+                    </button>
+                    {categories.map((cat) => {
+                      const count = questions.filter((q) => q.categoryName === cat).length;
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => handleCategoryChange(cat)}
+                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                            selectedCategory === cat
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {cat} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Question Selector & Navigation Bar */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
-                  <span className="text-xs font-bold text-slate-700">Active Room Question:</span>
-                  <select
-                    value={activeQuestion?.id || ''}
-                    onChange={(e) => {
-                      const found = questions.find((q) => q.id === e.target.value);
-                      if (found) handleSelectQuestion(found);
-                    }}
-                    className="bg-slate-50 border border-slate-200 text-indigo-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer max-w-xs"
-                  >
-                    {questions.map((q) => (
-                      <option key={q.id} value={q.id} className="bg-white text-slate-800">
-                        [{q.categoryName}] {q.title} ({q.type.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-slate-800">Active Room Question:</span>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                      {currentQuestionIdx >= 0 ? `${currentQuestionIdx + 1} / ${filteredQuestions.length}` : '0 / 0'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={handlePreviousQuestion}
+                      disabled={filteredQuestions.length <= 1}
+                      className="inline-flex items-center space-x-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold disabled:opacity-40 transition cursor-pointer"
+                      title="Previous Question"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Prev</span>
+                    </button>
+
+                    <select
+                      value={activeQuestion?.id || ''}
+                      onChange={(e) => {
+                        const found = questions.find((q) => q.id === e.target.value);
+                        if (found) handleSelectQuestion(found);
+                      }}
+                      className="bg-slate-50 border border-slate-200 text-indigo-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer max-w-xs"
+                    >
+                      {filteredQuestions.map((q, idx) => (
+                        <option key={q.id} value={q.id} className="bg-white text-slate-800">
+                          Q{idx + 1}: [{q.categoryName}] {q.title} ({q.type.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      onClick={handleNextQuestion}
+                      disabled={filteredQuestions.length <= 1}
+                      className="inline-flex items-center space-x-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold disabled:opacity-40 transition cursor-pointer"
+                      title="Next Question"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {activeQuestion && (
@@ -523,7 +640,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                           <button
                             key={idx}
                             onClick={() => setMcqSelected(idx)}
-                            className={`w-full p-3 rounded-xl border text-left text-xs font-medium transition ${
+                            className={`w-full p-3 rounded-xl border text-left text-xs font-medium transition cursor-pointer ${
                               mcqSelected === idx
                                 ? 'bg-indigo-50 border-indigo-600 text-indigo-900 shadow-xs'
                                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
@@ -551,22 +668,48 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                 )}
               </div>
 
-              {/* Submit Button & Feedback */}
+              {/* Submit Button, Feedback & Navigation */}
               <div className="pt-4 border-t border-slate-200 space-y-3">
                 {submissionFeedback && (
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-indigo-700 font-semibold">
-                    {submissionFeedback}
+                  <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 font-semibold flex items-center justify-between">
+                    <span>{submissionFeedback}</span>
+                    <button
+                      onClick={handleNextQuestion}
+                      className="ml-2 text-xs text-indigo-700 underline font-bold hover:text-indigo-900 cursor-pointer"
+                    >
+                      Skip / Next Question
+                    </button>
                   </div>
                 )}
 
-                <div className="flex justify-end">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
-                    onClick={handleRoomSubmission}
-                    className="flex items-center space-x-2 px-6 py-2.5 rounded-xl font-semibold text-xs bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition"
+                    onClick={handlePreviousQuestion}
+                    disabled={filteredQuestions.length <= 1}
+                    className="inline-flex items-center space-x-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold disabled:opacity-40 transition cursor-pointer"
                   >
-                    <Play className="w-4 h-4 fill-current" />
-                    <span>Submit & Update Room Score</span>
+                    <ChevronLeft className="w-4 h-4" />
+                    <span>Previous Question</span>
                   </button>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={handleRoomSubmission}
+                      className="flex items-center space-x-2 px-5 py-2.5 rounded-xl font-semibold text-xs bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition cursor-pointer"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>Submit Solution</span>
+                    </button>
+
+                    <button
+                      onClick={handleNextQuestion}
+                      disabled={filteredQuestions.length <= 1}
+                      className="flex items-center space-x-1.5 px-5 py-2.5 rounded-xl font-semibold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition cursor-pointer"
+                    >
+                      <span>Next Question</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
