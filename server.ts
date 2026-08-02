@@ -68,25 +68,30 @@ async function startServer() {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    if (password.length < 6) {
+    const cleanName = String(name).trim();
+    const cleanUsername = String(username).trim().toLowerCase();
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPassword = String(password).trim();
+
+    if (cleanPassword.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    const existing = db.getUserByEmailOrUsername(email) || db.getUserByEmailOrUsername(username);
+    const existing = db.getUserByEmailOrUsername(cleanEmail) || db.getUserByEmailOrUsername(cleanUsername);
     if (existing) {
       return res.status(400).json({ error: 'Email or Username already exists' });
     }
 
     const user = db.createUser(
       {
-        name: name.trim(),
-        username: username.trim().toLowerCase(),
-        email: email.trim().toLowerCase(),
+        name: cleanName,
+        username: cleanUsername,
+        email: cleanEmail,
         role: 'user',
         status: 'active',
-        avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${username.trim()}`,
+        avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`,
       },
-      password
+      cleanPassword
     );
 
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, {
@@ -104,7 +109,10 @@ async function startServer() {
       return res.status(400).json({ error: 'Username/Email and Password are required' });
     }
 
-    const user = db.getUserByEmailOrUsername(loginTerm);
+    const cleanTerm = String(loginTerm).trim();
+    const cleanPassword = String(password).trim();
+
+    const user = db.getUserByEmailOrUsername(cleanTerm);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -113,7 +121,7 @@ async function startServer() {
       return res.status(403).json({ error: 'Your account has been disabled by an administrator' });
     }
 
-    const isValid = db.verifyPassword(user.id, password);
+    const isValid = db.verifyPassword(user.id, cleanPassword);
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
