@@ -68,6 +68,8 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     drawWhiteboard,
     clearWhiteboard,
     requestWhiteboardState,
+    broadcastWhiteboardSync,
+    notifyWhiteboardActive,
     broadcastQuestionAttempt,
     sendSubmissionScore,
   } = useSocket();
@@ -224,7 +226,10 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     });
 
     socket.on('whiteboard_draw', (element: WhiteboardElement) => {
-      setDrawingElements((prev) => [...prev, element]);
+      setDrawingElements((prev) => {
+        if (element.id && prev.some((el) => el.id === element.id)) return prev;
+        return [...prev, element];
+      });
     });
 
     socket.on('whiteboard_clear', () => {
@@ -297,10 +302,15 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     };
   }, [roomId, socket]);
 
-  // Request latest whiteboard state whenever switching to whiteboard tab
+  // Request latest whiteboard state whenever switching to whiteboard tab or periodically
   useEffect(() => {
     if (activeWorkspaceTab === 'whiteboard' && roomId) {
       requestWhiteboardState(roomId);
+      notifyWhiteboardActive(roomId);
+      const interval = setInterval(() => {
+        requestWhiteboardState(roomId);
+      }, 3000);
+      return () => clearInterval(interval);
     }
   }, [activeWorkspaceTab, roomId]);
 
@@ -515,12 +525,20 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     });
   }, [drawingElements, currentElement, activeWorkspaceTab]);
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasCoordinates = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scaleX = canvas.width / (rect.width || 1);
+    const scaleY = canvas.height / (rect.height || 1);
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = getCanvasCoordinates(e);
 
     setIsDrawing(true);
 
@@ -539,15 +557,12 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       strokeWidth: drawWidth,
     };
     setCurrentElement(newEl);
+    notifyWhiteboardActive(roomId);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing || !currentElement) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getCanvasCoordinates(e);
 
     if (tool === 'pencil' || tool === 'eraser') {
       setCurrentElement({
@@ -574,7 +589,10 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     if (!isDrawing || !currentElement) return;
     setIsDrawing(false);
     drawWhiteboard(roomId, currentElement);
-    setDrawingElements((prev) => [...prev, currentElement]);
+    setDrawingElements((prev) => {
+      if (prev.some((el) => el.id === currentElement.id)) return prev;
+      return [...prev, currentElement];
+    });
     setCurrentElement(null);
   };
 
@@ -1115,8 +1133,21 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
                 <div className="flex items-center space-x-2">
                   <button
+                    onClick={() => {
+                      broadcastWhiteboardSync(roomId, drawingElements);
+                      notifyWhiteboardActive(roomId);
+                      setSubmissionFeedback(`📢 Live Whiteboard shared with all members in the room!`);
+                    }}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                    title="Broadcast and share current Whiteboard live with all members in room"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Share Whiteboard to Room</span>
+                  </button>
+
+                  <button
                     onClick={() => clearWhiteboard(roomId)}
-                    className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition shadow-xs"
+                    className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Clear Canvas</span>
@@ -1133,6 +1164,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                   onMouseDown={handleMouseDown}
                   onMouseMove={handleMouseMove}
                   onMouseUp={handleMouseUp}
+                  onMouseLeave={handleMouseUp}
                   className="w-full h-full cursor-crosshair block"
                 />
               </div>
