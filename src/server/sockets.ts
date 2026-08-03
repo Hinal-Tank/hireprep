@@ -67,22 +67,53 @@ export function setupSocketHandlers(io: SocketIOServer) {
     });
 
     // 5. Whiteboard Synchronization
-    socket.on('whiteboard_draw', ({ roomId, element }: { roomId: string; element: any }) => {
+    socket.on('request_whiteboard_state', ({ roomId }: { roomId: string }) => {
+      if (!roomId) return;
+      if (!whiteboardStores[roomId]) {
+        whiteboardStores[roomId] = [];
+      }
+      socket.emit('whiteboard_state', whiteboardStores[roomId]);
+    });
+
+    socket.on('whiteboard_draw', ({ roomId, element, user }: { roomId: string; element: any; user?: { username: string } }) => {
+      if (!roomId) return;
       if (!whiteboardStores[roomId]) {
         whiteboardStores[roomId] = [];
       }
       whiteboardStores[roomId].push(element);
       socket.to(roomId).emit('whiteboard_draw', element);
+      if (user?.username) {
+        socket.to(roomId).emit('whiteboard_active_user', { username: user.username });
+      }
     });
 
     socket.on('whiteboard_clear', ({ roomId }: { roomId: string }) => {
+      if (!roomId) return;
       whiteboardStores[roomId] = [];
       io.to(roomId).emit('whiteboard_clear');
     });
 
     socket.on('whiteboard_replace', ({ roomId, elements }: { roomId: string; elements: any[] }) => {
+      if (!roomId) return;
       whiteboardStores[roomId] = elements;
       socket.to(roomId).emit('whiteboard_state', elements);
+    });
+
+    // 6. Member Question Attempt / Option Select Live Sync
+    socket.on('member_question_attempt', (data: {
+      roomId: string;
+      questionId: string;
+      userId: string;
+      username: string;
+      avatar?: string;
+      selectedIndex?: number | null;
+      isCorrect?: boolean;
+      score?: number;
+      submissionType?: string;
+    }) => {
+      if (!data || !data.roomId) return;
+      // Broadcast attempt/selection to all members in the room including sender
+      io.to(data.roomId).emit('room_question_attempt', data);
     });
 
     // 6. Submission Scoreboard Update
