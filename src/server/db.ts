@@ -1454,12 +1454,21 @@ class DatabaseService {
     }
   }
 
+  private persistTimer: NodeJS.Timeout | null = null;
+
   private persist() {
-    try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('Error writing data store to file:', err);
-    }
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      try {
+        const payload = JSON.stringify(this.data, null, 2);
+        fs.writeFile(DATA_FILE, payload, 'utf-8', (err) => {
+          if (err) console.error('Error writing data store to file:', err);
+        });
+      } catch (err) {
+        console.error('Error in persist:', err);
+      }
+    }, 300);
   }
 
   private seedDefaultData() {
