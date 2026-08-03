@@ -148,16 +148,18 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     return questions.filter((q) => q.categoryName === selectedCategory);
   }, [questions, selectedCategory]);
 
+  const isHost = user?.id === roomData?.hostId || user?.role === 'admin';
+
   const currentQuestionIdx = filteredQuestions.findIndex((q) => q.id === activeQuestion?.id);
 
   const handleNextQuestion = () => {
-    if (filteredQuestions.length === 0) return;
+    if (!isHost || filteredQuestions.length === 0) return;
     const nextIdx = currentQuestionIdx < 0 ? 0 : (currentQuestionIdx + 1) % filteredQuestions.length;
     handleSelectQuestion(filteredQuestions[nextIdx]);
   };
 
   const handlePreviousQuestion = () => {
-    if (filteredQuestions.length === 0) return;
+    if (!isHost || filteredQuestions.length === 0) return;
     const prevIdx = currentQuestionIdx <= 0 ? filteredQuestions.length - 1 : currentQuestionIdx - 1;
     handleSelectQuestion(filteredQuestions[prevIdx]);
   };
@@ -165,7 +167,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   const handleCategoryChange = (cat: string) => {
     setSelectedCategory(cat);
     const matched = cat === 'ALL' ? questions : questions.filter((q) => q.categoryName === cat);
-    if (matched.length > 0) {
+    if (matched.length > 0 && isHost) {
       handleSelectQuestion(matched[0]);
     }
   };
@@ -350,10 +352,10 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     updateStatus(roomId, `Solving ${q.title}`, 'Solving');
   };
 
-  const handleSelectMcqOption = (idx: number) => {
+  const handleSelectMcqOption = async (idx: number) => {
     setMcqSelected(idx);
     if (!activeQuestion) return;
-    const isCorrect = activeQuestion.mcqData?.correctAnswerIndex === idx;
+    const isCorrect = activeQuestion.mcqData?.correctAnswer === idx;
     const score = isCorrect ? activeQuestion.points || 10 : 0;
 
     // Broadcast live option select to everyone in the room!
@@ -364,6 +366,41 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       `Selected Option ${String.fromCharCode(65 + idx)} on ${activeQuestion.title}`,
       isCorrect ? 'Correct' : 'Incorrect'
     );
+
+    // Auto-submit MCQ selection immediately
+    if (token) {
+      try {
+        const res = await fetch('/api/submissions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            questionId: activeQuestion.id,
+            answerOrCode: idx,
+            selectedIndex: idx,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const submittedCorrect = data.status === 'correct' || data.status === 'accepted';
+          if (submittedCorrect) {
+            setSolvedQuestionIds((prev) => new Set(prev).add(activeQuestion.id));
+            sendSubmissionScore(roomId, data.score || score);
+            confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+            setSubmissionFeedback(`🎉 Correct! Earned +${data.score || score} room points.`);
+            updateStatus(roomId, `Solved ${activeQuestion.title}`, 'Correct');
+          } else {
+            setSubmissionFeedback(`💡 Option ${String.fromCharCode(65 + idx)} is incorrect. Try another option or discuss with your peers!`);
+            updateStatus(roomId, `Attempted ${activeQuestion.title}`, 'Incorrect');
+          }
+        }
+      } catch (err) {
+        console.error('Error auto-submitting MCQ:', err);
+      }
+    }
   };
 
   // 2. Chat Send Handler
@@ -397,11 +434,6 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       if (res.ok) {
         const data = await res.json();
         const isCorrect = data.status === 'correct' || data.status === 'accepted';
-        setSubmissionFeedback(
-          isCorrect
-            ? `Correct! Earned +${data.score} room points.`
-            : `Submission outcome: ${data.status}.`
-        );
 
         if (isCorrect) {
           setSolvedQuestionIds((prev) => new Set(prev).add(activeQuestion.id));
@@ -409,12 +441,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
           broadcastQuestionAttempt(roomId, activeQuestion.id, mcqSelected, true, data.score);
           updateStatus(roomId, `Solved ${activeQuestion.title}`, 'Correct');
           confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
-          setSubmissionFeedback(
-            `🎉 Correct! Earned +${data.score} room points. Moving to the next question in 1.5s...`
-          );
-          setTimeout(() => {
-            handleNextQuestion();
-          }, 1500);
+          setSubmissionFeedback(`🎉 Correct! Earned +${data.score} room points.`);
         } else {
           broadcastQuestionAttempt(roomId, activeQuestion.id, mcqSelected, false, 0);
           setSubmissionFeedback(`Incorrect answer (${data.status}). Try again or discuss with your peers!`);
@@ -746,14 +773,27 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                       {currentQuestionIdx >= 0 ? `${currentQuestionIdx + 1} / ${filteredQuestions.length}` : '0 / 0'}
                       {filteredQuestions.length > 0 && ` (${filteredQuestions.filter(q => solvedQuestionIds.has(q.id)).length} Solved)`}
                     </span>
+                    {isHost ? (
+                      <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                        👑 You are Room Host (Question Control)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        👑 Host: {roomData?.hostName || 'Host'} (Controls Question)
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={handlePreviousQuestion}
-                      disabled={filteredQuestions.length <= 1}
-                      className="inline-flex items-center space-x-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold disabled:opacity-40 transition cursor-pointer"
-                      title="Previous Question"
+                      disabled={!isHost || filteredQuestions.length <= 1}
+                      className={`inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                        isHost && filteredQuestions.length > 1
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60'
+                      }`}
+                      title={isHost ? 'Previous Question' : 'Only the Room Host can change questions'}
                     >
                       <ChevronLeft className="w-4 h-4" />
                       <span>Prev</span>
@@ -761,11 +801,16 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
                     <select
                       value={activeQuestion?.id || ''}
+                      disabled={!isHost}
                       onChange={(e) => {
+                        if (!isHost) return;
                         const found = questions.find((q) => q.id === e.target.value);
                         if (found) handleSelectQuestion(found);
                       }}
-                      className="bg-slate-50 border border-slate-200 text-indigo-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer max-w-xs"
+                      className={`bg-slate-50 border border-slate-200 text-indigo-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-600 max-w-xs ${
+                        isHost ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                      }`}
+                      title={isHost ? 'Select Question' : 'Only the Room Host can change questions'}
                     >
                       {filteredQuestions.map((q, idx) => {
                         const isSolved = solvedQuestionIds.has(q.id);
@@ -779,9 +824,13 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
                     <button
                       onClick={handleNextQuestion}
-                      disabled={filteredQuestions.length <= 1}
-                      className="inline-flex items-center space-x-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold disabled:opacity-40 transition cursor-pointer"
-                      title="Next Question"
+                      disabled={!isHost || filteredQuestions.length <= 1}
+                      className={`inline-flex items-center space-x-1 px-3 py-1.5 border rounded-xl text-xs font-bold transition ${
+                        isHost && filteredQuestions.length > 1
+                          ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                      }`}
+                      title={isHost ? 'Next Question' : 'Only the Room Host can change questions'}
                     >
                       <span>Next</span>
                       <ChevronRight className="w-4 h-4" />
@@ -823,18 +872,26 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                             ) as RoomAttempt[]
                           ).filter((att) => att.selectedIndex === idx);
 
+                          const isThisSelected = mcqSelected === idx;
+                          const isOptionCorrect = activeQuestion.mcqData?.correctAnswer === idx;
+
+                          let optionStyle = 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100';
+                          if (isThisSelected) {
+                            if (isOptionCorrect) {
+                              optionStyle = 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-xs';
+                            } else {
+                              optionStyle = 'bg-rose-50 border-rose-500 text-rose-950 font-bold shadow-xs';
+                            }
+                          }
+
                           return (
                             <button
                               key={idx}
                               onClick={() => handleSelectMcqOption(idx)}
-                              className={`w-full p-3.5 rounded-xl border text-left text-xs font-medium transition cursor-pointer flex items-center justify-between gap-3 ${
-                                mcqSelected === idx
-                                  ? 'bg-indigo-50 border-indigo-600 text-indigo-900 shadow-xs'
-                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                              }`}
+                              className={`w-full p-3.5 rounded-xl border text-left text-xs transition cursor-pointer flex items-center justify-between gap-3 ${optionStyle}`}
                             >
                               <div className="flex items-center space-x-2">
-                                <span className="font-bold shrink-0">{String.fromCharCode(65 + idx)}.</span>
+                                <span className="font-extrabold shrink-0">{String.fromCharCode(65 + idx)}.</span>
                                 <span>{opt}</span>
                               </div>
 
@@ -856,7 +913,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                                         className="w-3.5 h-3.5 rounded-full"
                                       />
                                       <span>{att.username}</span>
-                                      <span>{att.isCorrect ? '✓' : '✗'}</span>
+                                      <span>{att.isCorrect ? '✓ Correct' : '✗ Incorrect'}</span>
                                     </span>
                                   ))}
                                 </div>
@@ -880,56 +937,71 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                     )}
 
                     {/* Live Room Member Responses Feed */}
-                    {activeQuestion && Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length > 0 && (
+                    {activeQuestion && (
                       <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <h3 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
                             <Users className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Live Room Member Responses & Answers:</span>
+                            <span>Live Room Member Responses & Real-Time Sync:</span>
                           </h3>
-                          <span className="text-[10px] text-slate-500 font-semibold">Synced for everyone</span>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                              Responded: {Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length} / {members.length || 1} Members
+                            </span>
+                            {members.length > 0 && Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length >= members.length && (
+                              <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                🎉 All Members Answered
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                          {(
-                            Object.values(
-                              roomQuestionAttempts[activeQuestion.id] || {}
-                            ) as RoomAttempt[]
-                          ).map((att) => (
-                            <div
-                              key={att.userId}
-                              className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs"
-                            >
-                              <div className="flex items-center space-x-2">
-                                <img
-                                  src={att.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${att.username}`}
-                                  alt=""
-                                  className="w-5 h-5 rounded-full"
-                                />
+                        {Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length === 0 ? (
+                          <p className="text-xs text-slate-400 italic py-2 text-center">
+                            Waiting for room members to respond to this question...
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            {(
+                              Object.values(
+                                roomQuestionAttempts[activeQuestion.id] || {}
+                              ) as RoomAttempt[]
+                            ).map((att) => (
+                              <div
+                                key={att.userId}
+                                className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <img
+                                    src={att.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${att.username}`}
+                                    alt=""
+                                    className="w-5 h-5 rounded-full"
+                                  />
+                                  <div>
+                                    <span className="font-bold text-slate-900">{att.username}</span>
+                                    {att.selectedIndex !== undefined && att.selectedIndex !== null && (
+                                      <span className="text-slate-500 text-[11px] ml-1.5">
+                                        chose Option {String.fromCharCode(65 + att.selectedIndex)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
                                 <div>
-                                  <span className="font-bold text-slate-900">{att.username}</span>
-                                  {att.selectedIndex !== undefined && att.selectedIndex !== null && (
-                                    <span className="text-slate-500 text-[11px] ml-1.5">
-                                      chose Option {String.fromCharCode(65 + att.selectedIndex)}
+                                  {att.isCorrect ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      ✓ Correct (+{att.score || 10} pts)
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                      ✗ Incorrect
                                     </span>
                                   )}
                                 </div>
                               </div>
-
-                              <div>
-                                {att.isCorrect ? (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    ✓ Correct (+{att.score || 10} pts)
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                    ✗ Incorrect
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
