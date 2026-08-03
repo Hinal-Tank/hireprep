@@ -202,11 +202,14 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     });
 
     socket.on('chat_history', (history: ChatMessage[]) => {
-      setMessages(history);
+      setMessages(history || []);
     });
 
     socket.on('chat_message', (msg: ChatMessage) => {
-      setMessages((prev) => [...prev, msg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
     });
 
     socket.on('room_question_changed', ({ question }: { question: Question }) => {
@@ -301,15 +304,15 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     }
   }, [activeWorkspaceTab, roomId]);
 
-  // Non-blocking smooth scroll for chat messages
+  // Smooth, non-blocking scroll for chat messages container
   useEffect(() => {
-    if (messages.length > 0) {
-      const timer = setTimeout(() => {
-        chatBottomRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 50);
-      return () => clearTimeout(timer);
+    if (activeSidebarTab === 'chat' && messages.length > 0) {
+      const container = document.getElementById('chat-messages-container');
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
-  }, [messages.length]);
+  }, [messages.length, activeSidebarTab]);
 
   const fetchRoomDetails = async () => {
     if (!token) return;
