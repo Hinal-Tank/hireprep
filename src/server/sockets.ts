@@ -81,7 +81,7 @@ export function setupSocketHandlers(io: SocketIOServer) {
         whiteboardStores[roomId] = [];
       }
       whiteboardStores[roomId].push(element);
-      socket.to(roomId).emit('whiteboard_draw', element);
+      io.to(roomId).emit('whiteboard_draw', element);
       if (user?.username) {
         socket.to(roomId).emit('whiteboard_active_user', { username: user.username });
       }
@@ -93,10 +93,18 @@ export function setupSocketHandlers(io: SocketIOServer) {
       io.to(roomId).emit('whiteboard_clear');
     });
 
-    socket.on('whiteboard_replace', ({ roomId, elements }: { roomId: string; elements: any[] }) => {
+    socket.on('whiteboard_replace', ({ roomId, elements, username }: { roomId: string; elements: any[]; username?: string }) => {
       if (!roomId) return;
-      whiteboardStores[roomId] = elements;
-      socket.to(roomId).emit('whiteboard_state', elements);
+      whiteboardStores[roomId] = elements || [];
+      io.to(roomId).emit('whiteboard_state', whiteboardStores[roomId]);
+      if (username) {
+        socket.to(roomId).emit('whiteboard_active_user', { username });
+      }
+    });
+
+    socket.on('whiteboard_active_user', ({ username, roomId }: { username: string; roomId: string }) => {
+      if (!roomId || !username) return;
+      socket.to(roomId).emit('whiteboard_active_user', { username });
     });
 
     // 6. Member Question Attempt / Option Select Live Sync
