@@ -12,6 +12,8 @@ interface SocketContextType {
   drawWhiteboard: (roomId: string, element: any) => void;
   clearWhiteboard: (roomId: string) => void;
   requestWhiteboardState: (roomId: string) => void;
+  broadcastWhiteboardSync: (roomId: string, elements: any[]) => void;
+  notifyWhiteboardActive: (roomId: string) => void;
   broadcastQuestionAttempt: (
     roomId: string,
     questionId: string,
@@ -100,6 +102,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const broadcastWhiteboardSync = (roomId: string, elements: any[]) => {
+    if (socket) {
+      socket.emit('whiteboard_replace', { roomId, elements, username: user?.username });
+    }
+  };
+
+  const notifyWhiteboardActive = (roomId: string) => {
+    if (socket && user) {
+      socket.emit('whiteboard_active_user', { roomId, username: user.username });
+    }
+  };
+
   const broadcastQuestionAttempt = (
     roomId: string,
     questionId: string,
@@ -139,6 +153,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         drawWhiteboard,
         clearWhiteboard,
         requestWhiteboardState,
+        broadcastWhiteboardSync,
+        notifyWhiteboardActive,
         broadcastQuestionAttempt,
         sendSubmissionScore,
       }}
