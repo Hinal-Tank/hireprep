@@ -11,6 +11,14 @@ interface SocketContextType {
   updateStatus: (roomId: string, activity: string, solvingStatus?: string) => void;
   drawWhiteboard: (roomId: string, element: any) => void;
   clearWhiteboard: (roomId: string) => void;
+  requestWhiteboardState: (roomId: string) => void;
+  broadcastQuestionAttempt: (
+    roomId: string,
+    questionId: string,
+    selectedIndex?: number | null,
+    isCorrect?: boolean,
+    score?: number
+  ) => void;
   sendSubmissionScore: (roomId: string, points: number) => void;
 }
 
@@ -76,13 +84,40 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const drawWhiteboard = (roomId: string, element: any) => {
     if (socket) {
-      socket.emit('whiteboard_draw', { roomId, element });
+      socket.emit('whiteboard_draw', { roomId, element, user: user ? { username: user.username } : undefined });
     }
   };
 
   const clearWhiteboard = (roomId: string) => {
     if (socket) {
       socket.emit('whiteboard_clear', { roomId });
+    }
+  };
+
+  const requestWhiteboardState = (roomId: string) => {
+    if (socket) {
+      socket.emit('request_whiteboard_state', { roomId });
+    }
+  };
+
+  const broadcastQuestionAttempt = (
+    roomId: string,
+    questionId: string,
+    selectedIndex?: number | null,
+    isCorrect?: boolean,
+    score?: number
+  ) => {
+    if (socket && user) {
+      socket.emit('member_question_attempt', {
+        roomId,
+        questionId,
+        userId: user.id,
+        username: user.username,
+        avatar: user.avatar,
+        selectedIndex,
+        isCorrect,
+        score,
+      });
     }
   };
 
@@ -103,6 +138,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updateStatus,
         drawWhiteboard,
         clearWhiteboard,
+        requestWhiteboardState,
+        broadcastQuestionAttempt,
         sendSubmissionScore,
       }}
     >
