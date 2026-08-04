@@ -17,12 +17,11 @@ import { parsePythonQuestionBank } from './pythonQuestionBankParser.js';
 import { parseCQuestionBank } from './cQuestionBankParser.js';
 import { parseCppQuestionBank } from './cppQuestionBankParser.js';
 import { parseJavaQuestionBank } from './javaQuestionBankParser.js';
-import { parseDsaQuestionBank } from './dsaQuestionBankParser.js';
+import { parseDsaQuestionBank, getDsaMcqQuestions } from './dsaQuestionBankParser.js';
 import { parseHrQuestionBank } from './hrQuestionBankParser.js';
 import { parseSqlQueries } from './sqlQueriesParser.js';
 import { parseSqlMcqBank } from './sqlMcqParser.js';
 import { getAptitudeQuestions } from './aptitudeQuestionBank.js';
-import { getDsaMcqQuestions } from './dsaMcqQuestionBank.js';
 
 const DATA_FILE = path.join(process.cwd(), 'data_store.json');
 
