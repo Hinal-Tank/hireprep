@@ -21,6 +21,7 @@ interface SocketContextType {
     isCorrect?: boolean,
     score?: number
   ) => void;
+  hostForceRevealAnswers: (roomId: string, questionId: string) => void;
   sendSubmissionScore: (roomId: string, points: number) => void;
 }
 
@@ -31,20 +32,41 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
+  const currentRoomIdRef = React.useRef<string | null>(null);
+  const userRef = React.useRef(user);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   useEffect(() => {
     const socketInstance = io(window.location.origin, {
       autoConnect: true,
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
     socketInstance.on('connect', () => {
       setIsConnected(true);
       console.log('Connected to socket server');
+      // Auto rejoin room on reconnect if previously in a room
+      if (currentRoomIdRef.current && userRef.current) {
+        socketInstance.emit('join_room', {
+          roomId: currentRoomIdRef.current,
+          user: { id: userRef.current.id, username: userRef.current.username, avatar: userRef.current.avatar },
+        });
+      }
     });
 
-    socketInstance.on('disconnect', () => {
+    socketInstance.on('disconnect', (reason) => {
       setIsConnected(false);
-      console.log('Disconnected from socket server');
+      console.log('Disconnected from socket server:', reason);
+      if (reason === 'io server disconnect') {
+        socketInstance.connect();
+      }
     });
 
     setSocket(socketInstance);
@@ -55,6 +77,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const joinRoom = (roomId: string) => {
+    currentRoomIdRef.current = roomId;
     if (socket && user) {
       socket.emit('join_room', { roomId, user: { id: user.id, username: user.username, avatar: user.avatar } });
     }
@@ -135,6 +158,12 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const hostForceRevealAnswers = (roomId: string, questionId: string) => {
+    if (socket) {
+      socket.emit('host_force_reveal_answers', { roomId, questionId });
+    }
+  };
+
   const sendSubmissionScore = (roomId: string, points: number) => {
     if (socket && user) {
       socket.emit('room_submission', { roomId, userId: user.id, pointsEarned: points });
@@ -156,6 +185,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         broadcastWhiteboardSync,
         notifyWhiteboardActive,
         broadcastQuestionAttempt,
+        hostForceRevealAnswers,
         sendSubmissionScore,
       }}
     >
