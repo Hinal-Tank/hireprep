@@ -414,13 +414,6 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     const score = isCorrect ? activeQuestion.points || 10 : 0;
     const optionLetter = String.fromCharCode(65 + idx);
 
-    // Alert user immediately as requested!
-    if (isCorrect) {
-      alert(`🎉 Correct! You selected Option ${optionLetter} and it is the correct answer!`);
-    } else {
-      alert(`💡 Option ${optionLetter} is incorrect. Please wait for other room members to respond.`);
-    }
-
     // Broadcast option select secretly to server (stored until all members respond)
     broadcastQuestionAttempt(roomId, activeQuestion.id, idx, isCorrect, score);
 
