@@ -7,6 +7,24 @@ interface WhiteboardStateMap {
 
 const whiteboardStores: WhiteboardStateMap = {};
 
+interface QuestionResponseStore {
+  [roomId: string]: {
+    [questionId: string]: {
+      [userId: string]: {
+        userId: string;
+        username: string;
+        avatar?: string;
+        selectedIndex: number;
+        isCorrect: boolean;
+        score: number;
+        submittedAt: number;
+      };
+    };
+  };
+}
+
+const roomQuestionResponses: QuestionResponseStore = {};
+
 export function setupSocketHandlers(io: SocketIOServer) {
   io.on('connection', (socket: Socket) => {
     console.log(`Socket connected: ${socket.id}`);
@@ -119,9 +137,94 @@ export function setupSocketHandlers(io: SocketIOServer) {
       score?: number;
       submissionType?: string;
     }) => {
-      if (!data || !data.roomId) return;
-      // Broadcast attempt/selection to all members in the room including sender
-      io.to(data.roomId).emit('room_question_attempt', data);
+      if (!data || !data.roomId || !data.questionId) return;
+
+      const { roomId, questionId, userId, username, avatar, selectedIndex, isCorrect, score } = data;
+
+      if (!roomQuestionResponses[roomId]) {
+        roomQuestionResponses[roomId] = {};
+      }
+      if (!roomQuestionResponses[roomId][questionId]) {
+        roomQuestionResponses[roomId][questionId] = {};
+      }
+
+      if (selectedIndex !== undefined && selectedIndex !== null) {
+        roomQuestionResponses[roomId][questionId][userId] = {
+          userId,
+          username,
+          avatar,
+          selectedIndex,
+          isCorrect: !!isCorrect,
+          score: score || 0,
+          submittedAt: Date.now(),
+        };
+      }
+
+      const responsesMap = roomQuestionResponses[roomId][questionId] || {};
+      const activeMembers = db.getRoomMembers(roomId).filter((m) => m.isOnline);
+      const totalMembersCount = Math.max(activeMembers.length, 1);
+      const respondedUserIds = Object.keys(responsesMap);
+      const allResponded = activeMembers.length > 0 && activeMembers.every((m) => respondedUserIds.includes(m.userId));
+
+      if (allResponded) {
+        // All members have answered! Reveal answers and choices to everyone
+        io.to(roomId).emit('room_question_answers_revealed', {
+          roomId,
+          questionId,
+          responses: responsesMap,
+          allResponded: true,
+        });
+      } else {
+        // Broadcast secret response notification (showing WHO responded, but NOT their selected option or correctness)
+        io.to(roomId).emit('room_question_attempt', {
+          roomId,
+          questionId,
+          userId,
+          username,
+          avatar,
+          hasResponded: true,
+          respondedUserIds,
+          respondedCount: respondedUserIds.length,
+          totalMembersCount,
+          allResponded: false,
+          timestamp: Date.now(),
+        });
+      }
+    });
+
+    socket.on('host_force_reveal_answers', ({ roomId, questionId }: { roomId: string; questionId: string }) => {
+      if (!roomId || !questionId) return;
+      const responsesMap = roomQuestionResponses[roomId]?.[questionId] || {};
+      io.to(roomId).emit('room_question_answers_revealed', {
+        roomId,
+        questionId,
+        responses: responsesMap,
+        forcedByHost: true,
+      });
+    });
+
+    socket.on('request_question_responses_status', ({ roomId, questionId }: { roomId: string; questionId: string }) => {
+      if (!roomId || !questionId) return;
+      const responsesMap = roomQuestionResponses[roomId]?.[questionId] || {};
+      const activeMembers = db.getRoomMembers(roomId).filter((m) => m.isOnline);
+      const respondedUserIds = Object.keys(responsesMap);
+      const allResponded = activeMembers.length > 0 && activeMembers.every((m) => respondedUserIds.includes(m.userId));
+
+      if (allResponded) {
+        socket.emit('room_question_answers_revealed', {
+          roomId,
+          questionId,
+          responses: responsesMap,
+          allResponded: true,
+        });
+      } else {
+        socket.emit('room_question_responses_status', {
+          roomId,
+          questionId,
+          respondedUserIds,
+          isRevealed: false,
+        });
+      }
     });
 
     // 6. Submission Scoreboard Update
