@@ -71,6 +71,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
     broadcastWhiteboardSync,
     notifyWhiteboardActive,
     broadcastQuestionAttempt,
+    hostForceRevealAnswers,
     sendSubmissionScore,
   } = useSocket();
 
@@ -79,8 +80,8 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'question' | 'whiteboard' | 'call'>('question');
 
-  // Sidebar Tab: 'chat' | 'members' | 'scoreboard'
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'members' | 'scoreboard'>('chat');
+  // Sidebar Tab: 'chat' | 'responses' | 'members' | 'scoreboard'
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'responses' | 'members' | 'scoreboard'>('responses');
   const [chatInput, setChatInput] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -93,22 +94,26 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   const [submissionFeedback, setSubmissionFeedback] = useState<string | null>(null);
   const [solvedQuestionIds, setSolvedQuestionIds] = useState<Set<string>>(new Set());
 
-  // Real-time room member attempts & option selections per question ID
-  const [roomQuestionAttempts, setRoomQuestionAttempts] = useState<
+  // Real-time room responses & reveal status map per question ID
+  const [questionResponsesMap, setQuestionResponsesMap] = useState<
     Record<
       string,
-      Record<
-        string,
-        {
-          userId: string;
-          username: string;
-          avatar?: string;
-          selectedIndex?: number | null;
-          isCorrect?: boolean;
-          score?: number;
-          timestamp: number;
-        }
-      >
+      {
+        isRevealed: boolean;
+        responses: Record<
+          string,
+          {
+            userId: string;
+            username: string;
+            avatar?: string;
+            selectedIndex?: number;
+            isCorrect?: boolean;
+            score?: number;
+            submittedAt?: number;
+          }
+        >;
+        respondedUserIds: string[];
+      }
     >
   >({});
 
@@ -155,13 +160,21 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   const currentQuestionIdx = filteredQuestions.findIndex((q) => q.id === activeQuestion?.id);
 
   const handleNextQuestion = () => {
-    if (!isHost || filteredQuestions.length === 0) return;
+    if (!isHost) {
+      alert('🔒 Only the Room Host / Admin can navigate to the next question for all members.');
+      return;
+    }
+    if (filteredQuestions.length === 0) return;
     const nextIdx = currentQuestionIdx < 0 ? 0 : (currentQuestionIdx + 1) % filteredQuestions.length;
     handleSelectQuestion(filteredQuestions[nextIdx]);
   };
 
   const handlePreviousQuestion = () => {
-    if (!isHost || filteredQuestions.length === 0) return;
+    if (!isHost) {
+      alert('🔒 Only the Room Host / Admin can navigate to the previous question.');
+      return;
+    }
+    if (filteredQuestions.length === 0) return;
     const prevIdx = currentQuestionIdx <= 0 ? filteredQuestions.length - 1 : currentQuestionIdx - 1;
     handleSelectQuestion(filteredQuestions[prevIdx]);
   };
@@ -219,6 +232,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       setMcqSelected(null);
       setCodeAnswer(question.codingData?.starterCode?.python || (question.type === 'sql' ? '-- Write your SQL query below:\n' : ''));
       setSubmissionFeedback(null);
+      socket.emit('request_question_responses_status', { roomId, questionId: question.id });
     });
 
     socket.on('whiteboard_state', (elements: WhiteboardElement[]) => {
@@ -249,38 +263,64 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       userId: string;
       username: string;
       avatar?: string;
-      selectedIndex?: number | null;
-      isCorrect?: boolean;
-      score?: number;
+      hasResponded?: boolean;
+      respondedUserIds?: string[];
+      allResponded?: boolean;
     }) => {
-      setRoomQuestionAttempts((prev) => {
-        const qAttempts = prev[data.questionId] || {};
+      setQuestionResponsesMap((prev) => {
+        const current = prev[data.questionId] || { isRevealed: false, responses: {}, respondedUserIds: [] };
+        const updatedResponded = data.respondedUserIds || Array.from(new Set([...current.respondedUserIds, data.userId]));
         return {
           ...prev,
           [data.questionId]: {
-            ...qAttempts,
-            [data.userId]: {
-              userId: data.userId,
-              username: data.username,
-              avatar: data.avatar,
-              selectedIndex: data.selectedIndex,
-              isCorrect: data.isCorrect,
-              score: data.score,
-              timestamp: Date.now(),
-            },
+            ...current,
+            respondedUserIds: updatedResponded,
           },
         };
       });
 
-      if (data.isCorrect !== undefined) {
-        const optionLabel =
-          data.selectedIndex !== undefined && data.selectedIndex !== null
-            ? `Option ${String.fromCharCode(65 + data.selectedIndex)}`
-            : '';
-        const text = data.isCorrect
-          ? `🎉 ${data.username} selected ${optionLabel} and solved the question correctly! (+${data.score || 10} pts)`
-          : `💡 ${data.username} selected ${optionLabel} (Incorrect answer)`;
-        setSubmissionFeedback(text);
+      if (data.username) {
+        setSubmissionFeedback(`💡 ${data.username} submitted an answer! (Choices locked until all members respond)`);
+      }
+    });
+
+    socket.on('room_question_responses_status', (data: {
+      questionId: string;
+      respondedUserIds: string[];
+      isRevealed?: boolean;
+    }) => {
+      if (!data || !data.questionId) return;
+      setQuestionResponsesMap((prev) => ({
+        ...prev,
+        [data.questionId]: {
+          ...prev[data.questionId],
+          isRevealed: data.isRevealed || false,
+          respondedUserIds: data.respondedUserIds || [],
+        },
+      }));
+    });
+
+    socket.on('room_question_answers_revealed', (data: {
+      questionId: string;
+      responses: Record<string, any>;
+      allResponded?: boolean;
+      forcedByHost?: boolean;
+    }) => {
+      setQuestionResponsesMap((prev) => ({
+        ...prev,
+        [data.questionId]: {
+          isRevealed: true,
+          responses: data.responses || {},
+          respondedUserIds: Object.keys(data.responses || {}),
+        },
+      }));
+
+      setSubmissionFeedback(`🎉 All members responded! Correct answers and choices revealed.`);
+
+      if (user && data.responses?.[user.id]?.isCorrect) {
+        try {
+          confetti({ particleCount: 70, spread: 80, origin: { y: 0.6 } });
+        } catch (e) {}
       }
     });
 
@@ -298,6 +338,8 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
       socket.off('whiteboard_clear');
       socket.off('whiteboard_active_user');
       socket.off('room_question_attempt');
+      socket.off('room_question_responses_status');
+      socket.off('room_question_answers_revealed');
       socket.off('scoreboard_update');
     };
   }, [roomId, socket]);
@@ -366,21 +408,29 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
   };
 
   const handleSelectMcqOption = async (idx: number) => {
-    setMcqSelected(idx);
     if (!activeQuestion) return;
+    setMcqSelected(idx);
     const isCorrect = activeQuestion.mcqData?.correctAnswer === idx;
     const score = isCorrect ? activeQuestion.points || 10 : 0;
+    const optionLetter = String.fromCharCode(65 + idx);
 
-    // Broadcast live option select to everyone in the room!
+    // Alert user immediately as requested!
+    if (isCorrect) {
+      alert(`🎉 Correct! You selected Option ${optionLetter} and it is the correct answer!`);
+    } else {
+      alert(`💡 Option ${optionLetter} is incorrect. Please wait for other room members to respond.`);
+    }
+
+    // Broadcast option select secretly to server (stored until all members respond)
     broadcastQuestionAttempt(roomId, activeQuestion.id, idx, isCorrect, score);
 
     updateStatus(
       roomId,
-      `Selected Option ${String.fromCharCode(65 + idx)} on ${activeQuestion.title}`,
+      `Selected Option ${optionLetter} on ${activeQuestion.title}`,
       isCorrect ? 'Correct' : 'Incorrect'
     );
 
-    // Auto-submit MCQ selection immediately
+    // Auto-submit MCQ selection immediately (DO NOT jump to next question automatically)
     if (token) {
       try {
         const res = await fetch('/api/submissions', {
@@ -402,11 +452,10 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
           if (submittedCorrect) {
             setSolvedQuestionIds((prev) => new Set(prev).add(activeQuestion.id));
             sendSubmissionScore(roomId, data.score || score);
-            confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
-            setSubmissionFeedback(`🎉 Correct! Earned +${data.score || score} room points.`);
+            setSubmissionFeedback(`🎉 Submitted Option ${optionLetter} (Correct)! Earned +${data.score || score} room points.`);
             updateStatus(roomId, `Solved ${activeQuestion.title}`, 'Correct');
           } else {
-            setSubmissionFeedback(`💡 Option ${String.fromCharCode(65 + idx)} is incorrect. Try another option or discuss with your peers!`);
+            setSubmissionFeedback(`💡 Submitted Option ${optionLetter} (Incorrect). Waiting for all members to answer...`);
             updateStatus(roomId, `Attempted ${activeQuestion.title}`, 'Incorrect');
           }
         }
@@ -883,65 +932,99 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                       <p className="text-xs text-slate-600 leading-relaxed mt-1">{activeQuestion.description}</p>
                     </div>
 
-                    {/* MCQ Options with Live Member Badges */}
+                    {/* MCQ Options with Real-Time Member Selections */}
                     {activeQuestion.type === 'mcq' && (
-                      <div className="space-y-2.5 pt-2">
-                        {activeQuestion.mcqData?.options.map((opt, idx) => {
-                          const membersWhoSelected = (
-                            Object.values(
-                              roomQuestionAttempts[activeQuestion.id] || {}
-                            ) as RoomAttempt[]
-                          ).filter((att) => att.selectedIndex === idx);
-
-                          const isThisSelected = mcqSelected === idx;
-                          const isOptionCorrect = activeQuestion.mcqData?.correctAnswer === idx;
-
-                          let optionStyle = 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100';
-                          if (isThisSelected) {
-                            if (isOptionCorrect) {
-                              optionStyle = 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-xs';
-                            } else {
-                              optionStyle = 'bg-rose-50 border-rose-500 text-rose-950 font-bold shadow-xs';
-                            }
-                          }
+                      <div className="space-y-3 pt-2">
+                        {(() => {
+                          const qState = questionResponsesMap[activeQuestion.id] || { isRevealed: false, responses: {}, respondedUserIds: [] };
+                          const isRevealed = qState.isRevealed;
 
                           return (
-                            <button
-                              key={idx}
-                              onClick={() => handleSelectMcqOption(idx)}
-                              className={`w-full p-3.5 rounded-xl border text-left text-xs transition cursor-pointer flex items-center justify-between gap-3 ${optionStyle}`}
-                            >
-                              <div className="flex items-center space-x-2">
-                                <span className="font-extrabold shrink-0">{String.fromCharCode(65 + idx)}.</span>
-                                <span>{opt}</span>
+                            <>
+                              <div className="space-y-2.5">
+                                {activeQuestion.mcqData?.options.map((opt, idx) => {
+                                  const isThisSelected = mcqSelected === idx;
+                                  const isOptionCorrect = activeQuestion.mcqData?.correctAnswer === idx;
+
+                                  let optionStyle = 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300';
+
+                                  if (isRevealed) {
+                                    if (isOptionCorrect) {
+                                      optionStyle = 'bg-emerald-50 border-emerald-600 text-emerald-950 font-bold shadow-xs';
+                                    } else if (isThisSelected) {
+                                      optionStyle = 'bg-rose-50 border-rose-500 text-rose-950 font-bold shadow-xs';
+                                    }
+                                  } else {
+                                    if (isThisSelected) {
+                                      optionStyle = 'bg-indigo-50 border-indigo-600 text-indigo-950 font-bold shadow-xs';
+                                    }
+                                  }
+
+                                  // Members who picked this option when REVEALED
+                                  const membersWhoSelected = isRevealed
+                                    ? Object.values(qState.responses || {}).filter((r) => r.selectedIndex === idx)
+                                    : [];
+
+                                  return (
+                                    <button
+                                      key={idx}
+                                      onClick={() => handleSelectMcqOption(idx)}
+                                      className={`w-full p-3.5 rounded-xl border text-left text-xs transition cursor-pointer flex flex-wrap items-center justify-between gap-3 ${optionStyle}`}
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <span className="font-extrabold shrink-0 w-6 h-6 rounded-lg bg-slate-200/60 flex items-center justify-center text-[11px]">
+                                          {String.fromCharCode(65 + idx)}
+                                        </span>
+                                        <span className="leading-snug">{opt}</span>
+                                      </div>
+
+                                      {/* User's selection prior to reveal */}
+                                      {!isRevealed && isThisSelected && (
+                                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 border border-indigo-200 px-2.5 py-0.5 rounded-full shrink-0">
+                                          ✓ Your Choice (Submitted 🔒)
+                                        </span>
+                                      )}
+
+                                      {/* Revealed choices for all members */}
+                                      {isRevealed && membersWhoSelected.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                          {membersWhoSelected.map((resp) => (
+                                            <span
+                                              key={resp.userId}
+                                              className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border ${
+                                                resp.isCorrect
+                                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                                  : 'bg-rose-100 text-rose-800 border-rose-300'
+                                              }`}
+                                            >
+                                              <img
+                                                src={resp.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${resp.username}`}
+                                                alt=""
+                                                className="w-3.5 h-3.5 rounded-full"
+                                              />
+                                              <span>{resp.username}</span>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
                               </div>
 
-                              {/* Live Member Selections on Option */}
-                              {membersWhoSelected.length > 0 && (
-                                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                                  {membersWhoSelected.map((att) => (
-                                    <span
-                                      key={att.userId}
-                                      className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold shadow-2xs border ${
-                                        att.isCorrect
-                                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                          : 'bg-rose-100 text-rose-800 border-rose-300'
-                                      }`}
-                                    >
-                                      <img
-                                        src={att.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${att.username}`}
-                                        alt=""
-                                        className="w-3.5 h-3.5 rounded-full"
-                                      />
-                                      <span>{att.username}</span>
-                                      <span>{att.isCorrect ? '✓ Correct' : '✗ Incorrect'}</span>
-                                    </span>
-                                  ))}
+                              {/* Explanation box (revealed when all members respond) */}
+                              {isRevealed && activeQuestion.mcqData?.explanation && (
+                                <div className="p-3.5 bg-amber-50/90 border border-amber-200/90 rounded-xl text-xs text-amber-950 space-y-1">
+                                  <span className="font-bold flex items-center space-x-1.5 text-amber-900">
+                                    <Sparkles className="w-4 h-4 text-amber-600" />
+                                    <span>Explanation & Solution Guide:</span>
+                                  </span>
+                                  <p className="leading-relaxed">{activeQuestion.mcqData.explanation}</p>
                                 </div>
                               )}
-                            </button>
+                            </>
                           );
-                        })}
+                        })()}
                       </div>
                     )}
 
@@ -957,72 +1040,112 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
                       </div>
                     )}
 
-                    {/* Live Room Member Responses Feed */}
+                    {/* Live Room Member Responses & Real-Time Sync Panel */}
                     {activeQuestion && (
-                      <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
-                            <Users className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Live Room Member Responses & Real-Time Sync:</span>
-                          </h3>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                              Responded: {Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length} / {members.length || 1} Members
-                            </span>
-                            {members.length > 0 && Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length >= members.length && (
-                              <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
-                                🎉 All Members Answered
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                      <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                        {(() => {
+                          const qState = questionResponsesMap[activeQuestion.id] || { isRevealed: false, responses: {}, respondedUserIds: [] };
+                          const isRevealed = qState.isRevealed;
+                          const respondedCount = qState.respondedUserIds.length;
+                          const totalMembers = Math.max(members.length, 1);
 
-                        {Object.keys(roomQuestionAttempts[activeQuestion.id] || {}).length === 0 ? (
-                          <p className="text-xs text-slate-400 italic py-2 text-center">
-                            Waiting for room members to respond to this question...
-                          </p>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                            {(
-                              Object.values(
-                                roomQuestionAttempts[activeQuestion.id] || {}
-                              ) as RoomAttempt[]
-                            ).map((att) => (
-                              <div
-                                key={att.userId}
-                                className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs"
-                              >
+                          return (
+                            <>
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                                <h3 className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                                  <Users className="w-4 h-4 text-indigo-600" />
+                                  <span>Live Member Responses (Real-Time Sync)</span>
+                                </h3>
                                 <div className="flex items-center space-x-2">
-                                  <img
-                                    src={att.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${att.username}`}
-                                    alt=""
-                                    className="w-5 h-5 rounded-full"
-                                  />
-                                  <div>
-                                    <span className="font-bold text-slate-900">{att.username}</span>
-                                    {att.selectedIndex !== undefined && att.selectedIndex !== null && (
-                                      <span className="text-slate-500 text-[11px] ml-1.5">
-                                        chose Option {String.fromCharCode(65 + att.selectedIndex)}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div>
-                                  {att.isCorrect ? (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                      ✓ Correct (+{att.score || 10} pts)
+                                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                                    Responded: {respondedCount} / {totalMembers} Members
+                                  </span>
+                                  {isRevealed ? (
+                                    <span className="text-[10px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full">
+                                      🎉 Correct Answers Revealed!
                                     </span>
                                   ) : (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                      ✗ Incorrect
+                                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                                      🔒 Choices Hidden Until All Answer
                                     </span>
                                   )}
                                 </div>
                               </div>
-                            ))}
-                          </div>
-                        )}
+
+                              {/* Status Info Banner */}
+                              <div className="text-[11px] text-slate-600 bg-white p-2.5 rounded-lg border border-slate-200 flex items-center justify-between">
+                                <span>
+                                  {isRevealed
+                                    ? `🎉 All members responded! Correct option is ${activeQuestion.mcqData?.correctAnswer !== undefined ? String.fromCharCode(65 + activeQuestion.mcqData.correctAnswer) : ''}.`
+                                    : '🔒 Selections are secret until all members answer (or Host reveals).'}
+                                </span>
+                                {isHost && !isRevealed && (
+                                  <button
+                                    onClick={() => hostForceRevealAnswers(roomId, activeQuestion.id)}
+                                    className="ml-2 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded-md transition cursor-pointer"
+                                  >
+                                    👑 Host: Reveal Answers Now
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Members Grid */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {members.map((mem) => {
+                                  const hasAnswered = qState.respondedUserIds.includes(mem.userId);
+                                  const memberResponse = qState.responses?.[mem.userId];
+
+                                  return (
+                                    <div
+                                      key={mem.id}
+                                      className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs shadow-2xs"
+                                    >
+                                      <div className="flex items-center space-x-2">
+                                        <img
+                                          src={mem.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${mem.username}`}
+                                          alt=""
+                                          className="w-5 h-5 rounded-full"
+                                        />
+                                        <div className="flex items-center space-x-1">
+                                          <span className="font-bold text-slate-900">{mem.username}</span>
+                                          {mem.isHost && (
+                                            <span className="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-1 py-0.2 rounded font-bold">
+                                              Host
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        {hasAnswered ? (
+                                          isRevealed && memberResponse ? (
+                                            <span
+                                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                                memberResponse.isCorrect
+                                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                                              }`}
+                                            >
+                                              Option {String.fromCharCode(65 + (memberResponse.selectedIndex ?? 0))} {memberResponse.isCorrect ? '✓' : '✗'}
+                                            </span>
+                                          ) : (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                              ✓ Responded 🔒
+                                            </span>
+                                          )
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                            ⏳ Thinking...
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -1257,13 +1380,23 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
           )}
         </div>
 
-        {/* Right Sidebar: Chat, Members, Scoreboard */}
+        {/* Right Sidebar: Chat, Live Responses, Members, Scoreboard */}
         <div className="lg:col-span-4 bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between max-h-[720px]">
           {/* Sidebar Tab Toggle */}
           <div className="flex items-center space-x-1 bg-slate-50 p-1 rounded-xl border border-slate-200 mb-4">
             <button
+              onClick={() => setActiveSidebarTab('responses')}
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 ${
+                activeSidebarTab === 'responses' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Responses</span>
+            </button>
+
+            <button
               onClick={() => setActiveSidebarTab('chat')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 ${
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 ${
                 activeSidebarTab === 'chat' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -1273,7 +1406,7 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
             <button
               onClick={() => setActiveSidebarTab('members')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 ${
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 ${
                 activeSidebarTab === 'members' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -1283,14 +1416,122 @@ export const StudyRoomWorkspacePage: React.FC<StudyRoomWorkspacePageProps> = ({
 
             <button
               onClick={() => setActiveSidebarTab('scoreboard')}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 ${
+              className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 ${
                 activeSidebarTab === 'scoreboard' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Trophy className="w-3.5 h-3.5 text-amber-500" />
-              <span>Scoreboard</span>
+              <span>Scores</span>
             </button>
           </div>
+
+          {/* TAB: LIVE ROOM MEMBER RESPONSES */}
+          {activeSidebarTab === 'responses' && (
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {activeQuestion ? (
+                (() => {
+                  const qState = questionResponsesMap[activeQuestion.id] || { isRevealed: false, responses: {}, respondedUserIds: [] };
+
+                  return (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">
+                          Active Question Status
+                        </span>
+                        <p className="text-xs font-bold text-slate-900 truncate">{activeQuestion.title}</p>
+                        <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-200">
+                          <span>
+                            Responded: <strong>{qState.respondedUserIds.length}</strong> / {Math.max(members.length, 1)}
+                          </span>
+                          {qState.isRevealed ? (
+                            <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              🎉 Revealed
+                            </span>
+                          ) : (
+                            <span className="text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              🔒 Choices Hidden
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Host Force Reveal Button */}
+                      {isHost && !qState.isRevealed && (
+                        <button
+                          onClick={() => hostForceRevealAnswers(roomId, activeQuestion.id)}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-xs flex items-center justify-center space-x-1.5"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>👑 Host: Force Reveal Answers Now</span>
+                        </button>
+                      )}
+
+                      <div className="space-y-2">
+                        {members.map((mem) => {
+                          const hasAnswered = qState.respondedUserIds.includes(mem.userId);
+                          const resp = qState.responses?.[mem.userId];
+
+                          return (
+                            <div
+                              key={mem.id}
+                              className="p-2.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between text-xs shadow-2xs"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <img
+                                  src={mem.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${mem.username}`}
+                                  alt=""
+                                  className="w-7 h-7 rounded-full border border-slate-200"
+                                />
+                                <div>
+                                  <div className="flex items-center space-x-1">
+                                    <span className="font-bold text-slate-800">{mem.username}</span>
+                                    {mem.isHost && (
+                                      <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1 py-0.2 rounded font-bold">
+                                        Host
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-slate-400">
+                                    {hasAnswered ? 'Submitted answer' : 'Waiting for answer...'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div>
+                                {hasAnswered ? (
+                                  qState.isRevealed && resp ? (
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                        resp.isCorrect
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                                      }`}
+                                    >
+                                      Option {String.fromCharCode(65 + (resp.selectedIndex ?? 0))} {resp.isCorrect ? '✓' : '✗'}
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      ✓ Responded 🔒
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] text-slate-400 bg-slate-100 border border-slate-200">
+                                    ⏳ Pending
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                <p className="text-xs text-slate-400 italic text-center py-4">No active question selected.</p>
+              )}
+            </div>
+          )}
 
           {/* TAB 1: LIVE CHAT */}
           {activeSidebarTab === 'chat' && (
