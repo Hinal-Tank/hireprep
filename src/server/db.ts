@@ -21,6 +21,8 @@ import { parseDsaQuestionBank } from './dsaQuestionBankParser.js';
 import { parseHrQuestionBank } from './hrQuestionBankParser.js';
 import { parseSqlQueries } from './sqlQueriesParser.js';
 import { parseSqlMcqBank } from './sqlMcqParser.js';
+import { getAptitudeQuestions } from './aptitudeQuestionBank.js';
+import { getDsaMcqQuestions } from './dsaMcqQuestionBank.js';
 
 const DATA_FILE = path.join(process.cwd(), 'data_store.json');
 
@@ -39,6 +41,7 @@ interface DbSchema {
 // Initial seed categories
 const INITIAL_CATEGORIES: Category[] = [
   { id: 'cat-dsa', name: 'DSA', description: 'Master Data Structures & Algorithms concepts, problem solving, and efficiency.' },
+  { id: 'cat-aptitude', name: 'Aptitude', description: 'Master Quantitative Aptitude, Logical Reasoning, and Problem Solving for tech interviews.' },
   { id: 'cat-sql', name: 'SQL', description: 'Practice relational database queries, joins, aggregations, and optimizations.' },
   { id: 'cat-hr', name: 'HR Interview', description: 'Prepare for HR and behavioral interview questions with high-scoring answers and rating guides.' },
   { id: 'cat-python', name: 'Python', description: 'Solve core Python challenges, data manipulation, and clean coding practices.' },
@@ -1405,7 +1408,7 @@ class DatabaseService {
 
         // Clean up former questions if present and sync all question banks
         this.data.questions = this.data.questions.filter((q) => {
-          if (['cat-python', 'cat-c', 'cat-cpp', 'cat-java', 'cat-dsa', 'cat-hr', 'cat-sql'].includes(q.categoryId)) return false;
+          if (['cat-python', 'cat-c', 'cat-cpp', 'cat-java', 'cat-dsa', 'cat-hr', 'cat-sql', 'cat-aptitude'].includes(q.categoryId)) return false;
           if (q.id === 'q-py-1' || q.id === 'q-py-2' || q.id === 'q-sql-1' || q.id === 'q-c-1' || q.id === 'q-c-2' || q.id === 'q-cpp-1' || q.id === 'q-cpp-2' || q.id === 'q-java-1' || q.id === 'q-java-2') return false;
           return true;
         });
@@ -1421,6 +1424,8 @@ class DatabaseService {
         // Sync initial questions & update existing questions with updated metadata
         const parsedQuestions = [
           ...parseDsaQuestionBank(),
+          ...getDsaMcqQuestions(),
+          ...getAptitudeQuestions(),
           ...parseHrQuestionBank(),
           ...parseSqlQueries(),
           ...parseSqlMcqBank(),
@@ -1429,7 +1434,7 @@ class DatabaseService {
           ...parseCppQuestionBank(),
           ...parseJavaQuestionBank(),
         ];
-        const initialFiltered = INITIAL_QUESTIONS.filter(q => !['cat-python', 'cat-c', 'cat-cpp', 'cat-java', 'cat-dsa', 'cat-hr', 'cat-sql'].includes(q.categoryId));
+        const initialFiltered = INITIAL_QUESTIONS.filter(q => !['cat-python', 'cat-c', 'cat-cpp', 'cat-java', 'cat-dsa', 'cat-hr', 'cat-sql', 'cat-aptitude'].includes(q.categoryId));
         const allSeedQuestions = [...initialFiltered, ...parsedQuestions];
         for (const q of allSeedQuestions) {
           const existingIdx = this.data.questions.findIndex((ex) => ex.id === q.id);
